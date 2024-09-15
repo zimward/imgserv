@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT type from images where id == ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "type",
+        "ordinal": 0,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "9ea82cd2609e6fce03a2374678ea618042499945a9405e98adc77438c4fa33e8"
+}

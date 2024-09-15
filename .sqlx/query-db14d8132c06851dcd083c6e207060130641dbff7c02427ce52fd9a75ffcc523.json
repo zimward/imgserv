@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM images WHERE created <= ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "db14d8132c06851dcd083c6e207060130641dbff7c02427ce52fd9a75ffcc523"
+}
