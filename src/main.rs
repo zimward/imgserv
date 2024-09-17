@@ -1,6 +1,6 @@
 use std::{
     env,
-    fs::read_to_string,
+    fs::{create_dir_all, read_to_string},
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -12,15 +12,21 @@ use rocket::{
     http::ContentType,
     post, routes,
     tokio::fs::remove_file,
-    Build, Rocket, State,
+    Build, Orbit, Rocket, State,
 };
 use rocket_db_pools::{Connection, Database};
 use serde::Deserialize;
 use sqlx::{Pool, Sqlite};
 
-#[derive(Deserialize, Debug)]
+fn _default_path() -> PathBuf {
+    PathBuf::from("/var/lib/imgserv")
+}
+
+#[derive(Deserialize, Clone)]
 struct Config {
-    webroot: String,
+    url: String,
+    #[serde(default = "_default_path")]
+    data_dir: PathBuf,
     image_ttl: u64,
     cleanup_interval: u64,
 }
@@ -65,7 +71,11 @@ impl Formats {
 struct Meta(sqlx::SqlitePool);
 
 #[get("/img/<id>")]
-async fn get_img(mut db: Connection<Meta>, id: i64) -> Option<(ContentType, NamedFile)> {
+async fn get_img(
+    mut db: Connection<Meta>,
+    config: &State<Config>,
+    id: i64,
+) -> Option<(ContentType, NamedFile)> {
     let type_id = sqlx::query!("SELECT type from images where id == ?", id)
         .fetch_one(&mut **db)
         .await
@@ -76,7 +86,7 @@ async fn get_img(mut db: Connection<Meta>, id: i64) -> Option<(ContentType, Name
         let format = Formats::try_from(type_id).unwrap();
         Some((
             format.get_mime(),
-            NamedFile::open(Path::new("data/").join(id.to_string()))
+            NamedFile::open(config.data_dir.join("data/").join(id.to_string()))
                 .await
                 .unwrap(),
         ))
@@ -109,11 +119,11 @@ async fn upload_any(
     .unwrap()
     .id;
     if file
-        .persist_to(Path::new("data/").join(id.to_string()))
+        .persist_to(config.data_dir.join("data/").join(id.to_string()))
         .await
         .is_ok()
     {
-        Some(format!("{}/img/{id}", config.webroot))
+        Some(format!("{}/img/{id}", config.url))
     } else {
         None
     }
@@ -144,7 +154,7 @@ async fn upload_jxl(
     upload_any(config, db, file, Formats::JpegXl).await
 }
 
-async fn cleanup(db: &Pool<Sqlite>, ttl: Duration) {
+async fn cleanup(db: &Pool<Sqlite>, data_dir: &Path, ttl: Duration) {
     //time 14 days ago
     let expiry_date: i64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -163,7 +173,9 @@ async fn cleanup(db: &Pool<Sqlite>, ttl: Duration) {
         .collect();
     //delete all expired files
     for e in &expired {
-        remove_file(format!("data/{e}")).await.unwrap();
+        remove_file(format!("{}/data/{e}", data_dir.to_str().unwrap()))
+            .await
+            .unwrap();
     }
     let res = sqlx::query!("DELETE FROM images WHERE created <= ?", expiry_date)
         .execute(db)
@@ -177,6 +189,21 @@ async fn cleanup(db: &Pool<Sqlite>, ttl: Duration) {
             expired.len()
         );
     }
+}
+
+fn cleanup_fairing(rocket: &Rocket<Orbit>, config: &Config) {
+    let db = Meta::fetch(rocket)
+        .map_or_else(|| Err(rocket), |db| Ok(db.0.clone()))
+        .unwrap();
+    let mut interval = rocket::tokio::time::interval(Duration::from_secs(config.cleanup_interval));
+    let ttl = Duration::from_secs(config.image_ttl);
+    let data_dir = config.data_dir.clone();
+    rocket::tokio::spawn(async move {
+        loop {
+            interval.tick().await;
+            cleanup(&db, &data_dir, ttl).await;
+        }
+    });
 }
 
 async fn run_migrations(rocket: Rocket<Build>) -> fairing::Result {
@@ -200,25 +227,19 @@ async fn main() -> Result<(), rocket::Error> {
         .unwrap_or_default();
 
     let config: Result<Config, toml::de::Error> = toml::from_str(config_src.as_str());
-    println!("{:?}", &config);
     if let Ok(config) = config {
+        create_dir_all(config.data_dir.join("data/")).unwrap();
+        let figment = rocket::Config::figment().merge((
+            "databases.db.url",
+            config.data_dir.join("db.sqlite").to_str(),
+        ));
+        let config_clone = config.clone();
         #[allow(clippy::no_effect_underscore_binding)]
-        let _rocket = rocket::build()
+        let _rocket = rocket::custom(figment)
             .attach(Meta::init())
             .attach(AdHoc::on_liftoff("cleanup", move |rocket| {
                 Box::pin(async move {
-                    let db = Meta::fetch(rocket)
-                        .map_or_else(|| Err(rocket), |db| Ok(db.0.clone()))
-                        .unwrap();
-                    let mut interval =
-                        rocket::tokio::time::interval(Duration::from_secs(config.cleanup_interval));
-                    let ttl = Duration::from_secs(config.image_ttl);
-                    rocket::tokio::spawn(async move {
-                        loop {
-                            interval.tick().await;
-                            cleanup(&db, ttl).await;
-                        }
-                    });
+                    cleanup_fairing(rocket, &config_clone);
                 })
             }))
             .attach(AdHoc::try_on_ignite("SQLx Migrations", run_migrations))
@@ -227,7 +248,7 @@ async fn main() -> Result<(), rocket::Error> {
             .launch()
             .await?;
     } else {
-        println!("no config");
+        eprintln!("No configuration could be found!");
     }
     Ok(())
 }
