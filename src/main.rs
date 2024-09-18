@@ -12,11 +12,12 @@ use rocket::{
     http::ContentType,
     post, routes,
     tokio::fs::remove_file,
-    Build, Orbit, Rocket, State,
+    Build, Orbit, Responder, Rocket, State,
 };
 use rocket_db_pools::{Connection, Database};
 use serde::Deserialize;
 use sqlx::{Pool, Sqlite};
+use thiserror::Error;
 
 fn _default_path() -> PathBuf {
     PathBuf::from("/var/lib/imgserv")
@@ -66,6 +67,16 @@ impl Formats {
     }
 }
 
+#[derive(Error, Debug, Responder)]
+enum ServError {
+    #[response(status = 404)]
+    #[error("Database Query did return nothing")]
+    EmptyQuery(String),
+    #[response(status = 500)]
+    #[error("Reading file from disk failed")]
+    ReadError(#[from] std::io::Error),
+}
+
 #[derive(Database)]
 #[database("db")]
 struct Meta(sqlx::SqlitePool);
@@ -75,24 +86,30 @@ async fn get_img(
     mut db: Connection<Meta>,
     config: &State<Config>,
     id: i64,
-) -> Option<(ContentType, NamedFile)> {
+) -> Result<(ContentType, NamedFile), ServError> {
     let type_id = sqlx::query!("SELECT type from images where id == ?", id)
         .fetch_one(&mut **db)
-        .await
-        .ok()
-        .and_then(|v| v.r#type);
-    if let Some(type_id) = type_id {
+        .await;
+    if let Ok(type_id) = type_id.map(|t| t.r#type) {
         //this failing would mean database corruption
-        let format = Formats::try_from(type_id).unwrap();
-        Some((
-            format.get_mime(),
-            NamedFile::open(config.data_dir.join("data/").join(id.to_string()))
-                .await
-                .unwrap(),
-        ))
+        let format = Formats::try_from(type_id.unwrap()).unwrap();
+        NamedFile::open(config.data_dir.join("data/").join(id.to_string()))
+            .await
+            .map(|file| (format.get_mime(), file))
+            .map_err(ServError::ReadError)
     } else {
-        None
+        Err(ServError::EmptyQuery("Not found in Database".to_string()))
     }
+}
+
+#[derive(Error, Debug, Responder)]
+enum UploadError {
+    #[error("Time went backwards or you are in the year 146,138,513,298")]
+    Time(String),
+    #[error("Failed to write data")]
+    Write(#[from] std::io::Error),
+    #[error("Failed to write entry to metadata db")]
+    Query(String),
 }
 
 async fn upload_any(
@@ -100,15 +117,14 @@ async fn upload_any(
     mut db: Connection<Meta>,
     mut file: TempFile<'_>,
     format: Formats,
-) -> Option<String> {
+) -> Result<String, UploadError> {
     let format = i64::from(format);
     //crash if time or id fails
     let time: i64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        .try_into()
-        .unwrap();
+        //you and i should be long dead when this conversion starts failing (and sqlite supports unsigned ints then)
+        .map(|val| i64::try_from(val.as_secs()).unwrap())
+        .map_err(|err| UploadError::Time(err.to_string()))?;
     let id: i64 = sqlx::query!(
         "INSERT INTO images (created,type) VALUES (?,?) RETURNING id",
         time,
@@ -116,17 +132,12 @@ async fn upload_any(
     )
     .fetch_one(&mut **db)
     .await
-    .unwrap()
+    .map_err(|err| UploadError::Query(err.to_string()))?
     .id;
-    if file
-        .persist_to(config.data_dir.join("data/").join(id.to_string()))
+    file.persist_to(config.data_dir.join("data/").join(id.to_string()))
         .await
-        .is_ok()
-    {
-        Some(format!("{}/img/{id}", config.url))
-    } else {
-        None
-    }
+        .map(|()| format!("{}/img/{id}", config.url))
+        .map_err(UploadError::Write)
 }
 
 #[post("/upload", format = "image/png", data = "<file>")]
@@ -134,7 +145,7 @@ async fn upload_png(
     config: &State<Config>,
     db: Connection<Meta>,
     file: TempFile<'_>,
-) -> Option<String> {
+) -> Result<String, UploadError> {
     upload_any(config, db, file, Formats::Png).await
 }
 #[post("/upload", format = "image/jpeg", data = "<file>")]
@@ -142,7 +153,7 @@ async fn upload_jpeg(
     config: &State<Config>,
     db: Connection<Meta>,
     file: TempFile<'_>,
-) -> Option<String> {
+) -> Result<String, UploadError> {
     upload_any(config, db, file, Formats::Jpeg).await
 }
 #[post("/upload", format = "image/jxl", data = "<file>")]
@@ -150,7 +161,7 @@ async fn upload_jxl(
     config: &State<Config>,
     db: Connection<Meta>,
     file: TempFile<'_>,
-) -> Option<String> {
+) -> Result<String, UploadError> {
     upload_any(config, db, file, Formats::JpegXl).await
 }
 
