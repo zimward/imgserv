@@ -1,2 +1,9 @@
 [default.databases.db]
 url = "db.sqlite"
+
+[default.limits]
+"file/jpeg" = "10 MiB"
+"file/png" = "10 MiB"
+"image/jpeg" = "10 MiB"
+"image/png" = "10 MiB"
+
