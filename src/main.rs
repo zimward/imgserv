@@ -6,6 +6,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use rocket::serde::Deserialize;
 use rocket::{
     data::ToByteUnit,
     fairing::{self, AdHoc},
@@ -19,7 +20,6 @@ use rocket::{
     Build, Data, Orbit, Responder, Rocket, State,
 };
 use rocket_db_pools::{Connection, Database};
-use serde::Deserialize;
 use sqlx::{Pool, Sqlite};
 use thiserror::Error;
 
@@ -28,6 +28,7 @@ fn _default_path() -> PathBuf {
 }
 
 #[derive(Deserialize, Clone)]
+#[serde(crate = "rocket::serde")]
 struct Config {
     url: String,
     #[serde(default = "_default_path")]
@@ -67,6 +68,19 @@ impl Formats {
             Self::Png => ContentType::new("image", "png"),
             Self::Jpeg => ContentType::new("image", "jpeg"),
             Self::JpegXl => ContentType::new("image", "jxl"),
+        }
+    }
+}
+
+impl TryFrom<&ContentType> for Formats {
+    type Error = UploadError;
+
+    fn try_from(value: &ContentType) -> Result<Self, Self::Error> {
+        match value.sub().as_str() {
+            "png" => Ok(Self::Png),
+            "jpeg" => Ok(Self::Jpeg),
+            "jxl" => Ok(Self::JpegXl),
+            _ => Err(Self::Error::Unsupported(())),
         }
     }
 }
@@ -117,23 +131,28 @@ enum UploadError {
     #[response(status = 422)]
     #[error("Empty file upload attempted")]
     EmptyRequest(()),
+    #[response(status = 415)]
+    #[error("Unsupported MIME-type")]
+    Unsupported(()),
 }
 
 //holds count of tmp files
 struct TmpfileID(AtomicU16);
 
-async fn upload_any(
+#[post("/upload", data = "<data_stream>")]
+async fn upload(
     config: &State<Config>,
     tmpf_id: &State<TmpfileID>,
     mut db: Connection<Meta>,
     data_stream: Data<'_>,
-    mime_type: Formats,
+    ct: &ContentType,
 ) -> Result<String, UploadError> {
     //stream data to file in TEMP
     let tmp_path = config.data_dir.join(format!(
         "imgserv_{}",
         tmpf_id.0.fetch_add(1, Ordering::Relaxed)
     ));
+    let mime_type = Formats::try_from(ct)?;
     let mime_id = i64::from(mime_type);
     let mut file = data_stream
         .open(16.mebibytes())
@@ -174,40 +193,12 @@ async fn upload_any(
             .await
             .map(|_| ())
             .map_err(UploadError::Write);
-        rocket::tokio::fs::remove_file(tmp_path).await?;
+        remove_file(tmp_path).await?;
         res
     };
     //tmp file has either been moved or deleted, so we can decrement its id
     tmpf_id.0.fetch_sub(1, Ordering::Relaxed);
     res.map(|()| format!("{}/img/{id}", config.url))
-}
-
-#[post("/upload", format = "image/png", data = "<file>")]
-async fn upload_png(
-    config: &State<Config>,
-    tmpf_id: &State<TmpfileID>,
-    db: Connection<Meta>,
-    file: Data<'_>,
-) -> Result<String, UploadError> {
-    upload_any(config, tmpf_id, db, file, Formats::Png).await
-}
-#[post("/upload", format = "image/jpeg", data = "<file>")]
-async fn upload_jpeg(
-    config: &State<Config>,
-    tmpf_id: &State<TmpfileID>,
-    db: Connection<Meta>,
-    file: Data<'_>,
-) -> Result<String, UploadError> {
-    upload_any(config, tmpf_id, db, file, Formats::Jpeg).await
-}
-#[post("/upload", format = "image/jxl", data = "<file>")]
-async fn upload_jxl(
-    config: &State<Config>,
-    tmpf_id: &State<TmpfileID>,
-    db: Connection<Meta>,
-    file: Data<'_>,
-) -> Result<String, UploadError> {
-    upload_any(config, tmpf_id, db, file, Formats::JpegXl).await
 }
 
 async fn cleanup(db: &Pool<Sqlite>, data_dir: &Path, ttl: Duration) {
@@ -301,7 +292,7 @@ async fn main() -> Result<(), rocket::Error> {
             .attach(AdHoc::try_on_ignite("SQLx Migrations", run_migrations))
             .manage(config)
             .manage(TmpfileID(AtomicU16::new(0)))
-            .mount("/", routes![get_img, upload_png, upload_jpeg, upload_jxl])
+            .mount("/", routes![get_img, upload])
             .launch()
             .await?;
     } else {

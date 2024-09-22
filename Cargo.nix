@@ -24,7 +24,7 @@ args@{
   ignoreLockHash,
 }:
 let
-  nixifiedLockHash = "694438d054915e57f512d761bbdc5d60bdef8181deabee03889ebc837ce3e097";
+  nixifiedLockHash = "033dbe257d1f164905739f8dc66813024248d3fde15610672f51bb3c76ab5418";
   workspaceSrc = if args.workspaceSrc == null then ./. else args.workspaceSrc;
   currentLockHash = builtins.hashFile "sha256" (workspaceSrc + /Cargo.lock);
   lockHashIgnored = if ignoreLockHash
@@ -1111,7 +1111,6 @@ in
     dependencies = {
       rocket = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rocket."0.5.1" { inherit profileName; }).out;
       rocket_db_pools = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rocket_db_pools."0.2.0" { inherit profileName; }).out;
-      serde = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde."1.0.210" { inherit profileName; }).out;
       sqlx = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".sqlx."0.7.4" { inherit profileName; }).out;
       thiserror = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".thiserror."1.0.63" { inherit profileName; }).out;
       toml = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".toml."0.8.19" { inherit profileName; }).out;

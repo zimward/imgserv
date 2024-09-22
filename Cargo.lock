@@ -736,7 +736,6 @@ version = "0.1.0"
 dependencies = [
  "rocket",
  "rocket_db_pools",
- "serde",
  "sqlx",
  "thiserror",
  "toml",
