@@ -6,13 +6,18 @@ use std::{
 };
 
 use rocket::{
+    data::ToByteUnit,
     fairing::{self, AdHoc},
-    fs::{NamedFile, TempFile},
+    fs::TempFile,
+    futures::io::BufWriter,
     get,
     http::ContentType,
-    post, routes,
-    tokio::fs::remove_file,
-    Build, Orbit, Responder, Rocket, State,
+    post, response, routes,
+    tokio::{
+        fs::{remove_file, File},
+        io::AsyncWriteExt,
+    },
+    Build, Data, Orbit, Responder, Rocket, State,
 };
 use rocket_db_pools::{Connection, Database};
 use serde::Deserialize;
@@ -86,14 +91,14 @@ async fn get_img(
     mut db: Connection<Meta>,
     config: &State<Config>,
     id: i64,
-) -> Result<(ContentType, NamedFile), ServError> {
+) -> Result<(ContentType, File), ServError> {
     let type_id = sqlx::query!("SELECT type from images where id == ?", id)
         .fetch_one(&mut **db)
         .await;
     if let Ok(type_id) = type_id.map(|t| t.r#type) {
         //this failing would mean database corruption
         let format = Formats::try_from(type_id.unwrap()).unwrap();
-        NamedFile::open(config.data_dir.join("data/").join(id.to_string()))
+        File::open(config.data_dir.join("data/").join(id.to_string()))
             .await
             .map(|file| (format.get_mime(), file))
             .map_err(ServError::ReadError)
@@ -110,15 +115,36 @@ enum UploadError {
     Write(#[from] std::io::Error),
     #[error("Failed to write entry to metadata db")]
     Query(String),
+    #[response(status = 422)]
+    #[error("Empty file upload attempted")]
+    EmptyRequest(()),
 }
 
 async fn upload_any(
     config: &State<Config>,
     mut db: Connection<Meta>,
-    mut file: TempFile<'_>,
-    format: Formats,
+    data_stream: Data<'_>,
+    mime_type: Formats,
 ) -> Result<String, UploadError> {
-    let format = i64::from(format);
+    //stream data to file in TEMP
+    let tmp_path = config
+        .data_dir
+        .join(format!("imgserv_{}", rand::random::<u16>()));
+    let mime_id = i64::from(mime_type);
+    let mut file = data_stream
+        .open(16.mebibytes())
+        .into_file(&tmp_path)
+        .await?;
+    if !file.is_complete() {
+        file.flush().await?;
+    }
+    if file.is_empty() {
+        file.shutdown().await?;
+        rocket::tokio::fs::remove_file(&tmp_path).await?;
+        return Err(UploadError::EmptyRequest(()));
+    }
+    file.shutdown().await?;
+
     //crash if time or id fails
     let time: i64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -128,23 +154,33 @@ async fn upload_any(
     let id: i64 = sqlx::query!(
         "INSERT INTO images (created,type) VALUES (?,?) RETURNING id",
         time,
-        format
+        mime_id
     )
     .fetch_one(&mut **db)
     .await
     .map_err(|err| UploadError::Query(err.to_string()))?
     .id;
-    file.persist_to(config.data_dir.join("data/").join(id.to_string()))
-        .await
-        .map(|()| format!("{}/img/{id}", config.url))
-        .map_err(UploadError::Write)
+    //move temp file to dest or copy is TEMP is a different mount point like tempfs
+    let dest = config.data_dir.join("data/").join(id.to_string());
+    let res = rocket::tokio::fs::rename(&tmp_path, &dest).await;
+    let res: Result<(), UploadError> = if res.is_ok() {
+        Ok(())
+    } else {
+        let res = rocket::tokio::fs::copy(&tmp_path, dest)
+            .await
+            .map(|_| ())
+            .map_err(UploadError::Write);
+        rocket::tokio::fs::remove_file(tmp_path).await?;
+        res
+    };
+    res.map(|()| format!("{}/img/{id}", config.url))
 }
 
 #[post("/upload", format = "image/png", data = "<file>")]
 async fn upload_png(
     config: &State<Config>,
     db: Connection<Meta>,
-    file: TempFile<'_>,
+    file: Data<'_>,
 ) -> Result<String, UploadError> {
     upload_any(config, db, file, Formats::Png).await
 }
@@ -152,7 +188,7 @@ async fn upload_png(
 async fn upload_jpeg(
     config: &State<Config>,
     db: Connection<Meta>,
-    file: TempFile<'_>,
+    file: Data<'_>,
 ) -> Result<String, UploadError> {
     upload_any(config, db, file, Formats::Jpeg).await
 }
@@ -160,7 +196,7 @@ async fn upload_jpeg(
 async fn upload_jxl(
     config: &State<Config>,
     db: Connection<Meta>,
-    file: TempFile<'_>,
+    file: Data<'_>,
 ) -> Result<String, UploadError> {
     upload_any(config, db, file, Formats::JpegXl).await
 }

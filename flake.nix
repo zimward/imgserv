@@ -1,23 +1,33 @@
 {
-  description = "A simple temporary image upload service";
-
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable-small";
+    cargo2nix.url = "github:cargo2nix/cargo2nix/release-0.11.0";
+    flake-utils.follows = "cargo2nix/flake-utils";
+    nixpkgs.follows = "cargo2nix/nixpkgs";
   };
 
   outputs =
-    { self, nixpkgs }:
-    let
-      systems = [
-        "x86_64-linux"
-        "aarch64-linux"
-      ];
-      forAllSystem = f: nixpkgs.lib.genAttrs systems (system: f system);
-    in
-    {
-      packages = forAllSystem (system: {
-        default = nixpkgs.legacyPackages.${system}.callPackage ./package.nix { };
-      });
+    inputs:
+    with inputs;
+    flake-utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ cargo2nix.overlays.default ];
+        };
 
-    };
+        rustPkgs = pkgs.rustBuilder.makePackageSet {
+          rustVersion = "1.75.0";
+          packageFun = import ./Cargo.nix;
+        };
+
+      in
+      rec {
+        packages = {
+          # replace hello-world with your package name
+          imgserv = (rustPkgs.workspace.imgserv { });
+          default = packages.imgserv;
+        };
+      }
+    );
 }
