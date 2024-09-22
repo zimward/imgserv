@@ -2,17 +2,16 @@ use std::{
     env,
     fs::{create_dir_all, read_to_string},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU16, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use rocket::{
     data::ToByteUnit,
     fairing::{self, AdHoc},
-    fs::TempFile,
-    futures::io::BufWriter,
     get,
     http::ContentType,
-    post, response, routes,
+    post, routes,
     tokio::{
         fs::{remove_file, File},
         io::AsyncWriteExt,
@@ -120,16 +119,21 @@ enum UploadError {
     EmptyRequest(()),
 }
 
+//holds count of tmp files
+struct TmpfileID(AtomicU16);
+
 async fn upload_any(
     config: &State<Config>,
+    tmpf_id: &State<TmpfileID>,
     mut db: Connection<Meta>,
     data_stream: Data<'_>,
     mime_type: Formats,
 ) -> Result<String, UploadError> {
     //stream data to file in TEMP
-    let tmp_path = config
-        .data_dir
-        .join(format!("imgserv_{}", rand::random::<u16>()));
+    let tmp_path = config.data_dir.join(format!(
+        "imgserv_{}",
+        tmpf_id.0.fetch_add(1, Ordering::Relaxed)
+    ));
     let mime_id = i64::from(mime_type);
     let mut file = data_stream
         .open(16.mebibytes())
@@ -173,32 +177,37 @@ async fn upload_any(
         rocket::tokio::fs::remove_file(tmp_path).await?;
         res
     };
+    //tmp file has either been moved or deleted, so we can decrement its id
+    tmpf_id.0.fetch_sub(1, Ordering::Relaxed);
     res.map(|()| format!("{}/img/{id}", config.url))
 }
 
 #[post("/upload", format = "image/png", data = "<file>")]
 async fn upload_png(
     config: &State<Config>,
+    tmpf_id: &State<TmpfileID>,
     db: Connection<Meta>,
     file: Data<'_>,
 ) -> Result<String, UploadError> {
-    upload_any(config, db, file, Formats::Png).await
+    upload_any(config, tmpf_id, db, file, Formats::Png).await
 }
 #[post("/upload", format = "image/jpeg", data = "<file>")]
 async fn upload_jpeg(
     config: &State<Config>,
+    tmpf_id: &State<TmpfileID>,
     db: Connection<Meta>,
     file: Data<'_>,
 ) -> Result<String, UploadError> {
-    upload_any(config, db, file, Formats::Jpeg).await
+    upload_any(config, tmpf_id, db, file, Formats::Jpeg).await
 }
 #[post("/upload", format = "image/jxl", data = "<file>")]
 async fn upload_jxl(
     config: &State<Config>,
+    tmpf_id: &State<TmpfileID>,
     db: Connection<Meta>,
     file: Data<'_>,
 ) -> Result<String, UploadError> {
-    upload_any(config, db, file, Formats::JpegXl).await
+    upload_any(config, tmpf_id, db, file, Formats::JpegXl).await
 }
 
 async fn cleanup(db: &Pool<Sqlite>, data_dir: &Path, ttl: Duration) {
@@ -291,6 +300,7 @@ async fn main() -> Result<(), rocket::Error> {
             }))
             .attach(AdHoc::try_on_ignite("SQLx Migrations", run_migrations))
             .manage(config)
+            .manage(TmpfileID(AtomicU16::new(0)))
             .mount("/", routes![get_img, upload_png, upload_jpeg, upload_jxl])
             .launch()
             .await?;

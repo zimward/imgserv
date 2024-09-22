@@ -734,7 +734,6 @@ dependencies = [
 name = "imgserv"
 version = "0.1.0"
 dependencies = [
- "rand",
  "rocket",
  "rocket_db_pools",
  "serde",
