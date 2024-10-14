@@ -3,21 +3,25 @@ name = "imgserv"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rocket = "0.5"
-thiserror = "1.0"
+#web framework
+axum = "0.7"
+tokio = {version="1.0",features=["full"]}
+sqlx = {version="0.8",default-features=false,features=["sqlite", "runtime-tokio","macros","migrate"]}
+
+#parsing
+serde = "1.0"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
-# tree_magic_mini = "3.1"
 tree_magic_mini = {git = "https://github.com/mbrubeck/tree_magic.git"}
+# tree_magic_mini = "3.1"
 
-[dependencies.sqlx]
-version = "0.7"
-default-features = false
-features = ["macros", "migrate"]
+#utilities
+anyhow = "1.0"
+tokio-util = { version = "0.7.12", features = ["io-util", "full"] }
+futures = "0.3"
 
-[dependencies.rocket_db_pools]
-version = "0.2.0"
-features = ["sqlx_sqlite"]
-
+[profile.release]
+strip=true
+lto=true
+codegen-units=1
