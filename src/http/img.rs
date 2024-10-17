@@ -4,11 +4,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::Context;
 use axum::{
     body::{Body, HttpBody},
     extract::{Path, Request, State},
-    http::{header, Response, StatusCode},
+    http::{header, HeaderValue, Response, StatusCode},
 };
 use futures::TryStreamExt;
 use serde::Deserialize;
@@ -31,10 +30,8 @@ pub async fn get_img(
     let format = async { tree_magic_mini::from_filepath(&path) }.await;
     if let Some(format) = format {
         //this failing would mean database corruption
-        let file = File::open(path)
-            .await
-            .context("Failed to read from disk")
-            .unwrap();
+        let file = File::open(path).await.expect("Failed to read from disk");
+        let size = file.metadata().await.map(|meta| meta.len()).unwrap_or(0);
         let reader = ReaderStream::new(file);
         let body = Body::from_stream(reader);
         let mut resp = Response::new(body);
@@ -44,6 +41,10 @@ pub async fn get_img(
                 .parse()
                 .map_err(|_| ApiError::Internal("Parsing mime-type failed"))?,
         );
+        //we havent read from the stream so its probably ok
+        //we havent read from the stream so its probably ok
+        resp.headers_mut()
+            .insert(header::CONTENT_LENGTH, HeaderValue::from(size));
         Ok(resp)
     } else {
         //this means the file does not exist, as every file is a octet-stream

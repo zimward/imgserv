@@ -1,6 +1,5 @@
-use std::{env, fs::read_to_string, path::PathBuf};
+use std::{env, error::Error, fs::read_to_string, path::PathBuf};
 
-use anyhow::Context;
 use cleanup::cleanup;
 use serde::Deserialize;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -24,17 +23,16 @@ pub struct Config {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() {
     let config_src = env::var("CONFIG_FILE").unwrap_or_else(|_| "/etc/imgserv.toml".to_string());
     let config_src = env::var("CONFIG")
         .or_else(|_| read_to_string(&config_src))
         .unwrap_or_default();
 
-    let config: Config = toml::from_str(config_src.as_str())?;
+    let config: Config = toml::from_str(config_src.as_str()).expect("Failed to parse config");
     create_dir_all(config.data_dir.join("data/"))
         .await
-        .context("failed to create data dir")?;
-
+        .expect("Failed to create data dir");
     let db = SqlitePoolOptions::new()
         .connect(
             config
@@ -44,11 +42,13 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_default(),
         )
         .await
-        .context("failed to connect to DB")?;
+        .expect("failed to connect to DB");
 
-    sqlx::migrate!("./migrations").run(&db).await?;
+    sqlx::migrate!("./migrations")
+        .run(&db)
+        .await
+        .expect("SQL migrations failed");
 
     cleanup(db.clone(), &config).await;
     http::serve(db, config).await;
-    Ok(())
 }
