@@ -43,10 +43,12 @@ impl IntoResponse for ApiError {
 
 pub async fn serve(db: Pool<sqlx::Sqlite>, config: Config) {
     let state = Arc::new(AppState { db, config });
+    let cors = tower_http::cors::CorsLayer::permissive();
     let router = Router::new()
         .route("/upload", post(upload))
         .route("/img/:id", get(get_img))
-        .with_state(state);
+        .with_state(state)
+        .layer(cors);
     let listener = TcpListener::bind("[::]:8000").await.unwrap();
     axum::serve(listener, router).await.unwrap();
 }

@@ -42,9 +42,12 @@ pub async fn get_img(
                 .map_err(|_| ApiError::Internal("Parsing mime-type failed"))?,
         );
         //we havent read from the stream so its probably ok
-        //we havent read from the stream so its probably ok
         resp.headers_mut()
             .insert(header::CONTENT_LENGTH, HeaderValue::from(size));
+        resp.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("*"),
+        );
         Ok(resp)
     } else {
         //this means the file does not exist, as every file is a octet-stream
