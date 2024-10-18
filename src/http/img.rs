@@ -48,6 +48,15 @@ pub async fn get_img(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static("*"),
         );
+        //allow caching for the ttl of images, might lead to doubleing of ttl
+        //on clients, but ttl is only meant to keep disk usage low
+        resp.headers_mut().insert(
+            header::CACHE_CONTROL,
+            format!("max-age={}", config.image_ttl)
+                .as_str()
+                .parse()
+                .expect("max-age parsing failed"),
+        );
         Ok(resp)
     } else {
         //this means the file does not exist, as every file is a octet-stream
