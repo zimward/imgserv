@@ -11,9 +11,8 @@ use tokio::net::TcpListener;
 
 use crate::Config;
 
-use self::img::{get_img, upload};
-
 mod img;
+mod paste;
 
 // #[derive(Clone)]
 struct AppState {
@@ -45,8 +44,10 @@ pub async fn serve(db: Pool<sqlx::Sqlite>, config: Config) {
     let state = Arc::new(AppState { db, config });
     let cors = tower_http::cors::CorsLayer::permissive();
     let router = Router::new()
-        .route("/upload", post(upload))
-        .route("/img/:id", get(get_img))
+        .route("/upload", post(img::upload))
+        .route("/img/:id", get(img::get))
+        .route("/paste/upload", post(paste::upload))
+        .route("/paste/:id", get(paste::get))
         .with_state(state)
         .layer(cors);
     let listener = TcpListener::bind("[::]:8000").await.unwrap();

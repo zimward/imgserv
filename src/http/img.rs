@@ -19,8 +19,7 @@ use super::{ApiError, AppState};
 #[derive(Deserialize)]
 pub struct ImageID(u64);
 
-#[allow(clippy::module_name_repetitions)]
-pub async fn get_img(
+pub async fn get(
     State(state): State<Arc<AppState>>,
     Path(id): Path<ImageID>,
 ) -> Result<Response<Body>, ApiError> {
@@ -52,7 +51,7 @@ pub async fn get_img(
         //on clients, but ttl is only meant to keep disk usage low
         resp.headers_mut().insert(
             header::CACHE_CONTROL,
-            format!("max-age={}", config.image_ttl)
+            format!("max-age={}", config.image_ttl.as_secs())
                 .as_str()
                 .parse()
                 .expect("max-age parsing failed"),

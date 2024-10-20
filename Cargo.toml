@@ -21,6 +21,8 @@ tree_magic_mini = {git = "https://github.com/mbrubeck/tree_magic.git"}
 #utilities
 tokio-util = { version = "0.7", features = ["io-util", "full"] }
 futures = "0.3"
+zstd = { version = "0.13", default-features = false }
+duration-str = { version = "0.11", features = ["serde"], default-features = false }
 
 [profile.release]
 strip=true

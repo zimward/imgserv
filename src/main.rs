@@ -1,10 +1,12 @@
-use std::{env, error::Error, fs::read_to_string, path::PathBuf};
+use std::{env, fs::read_to_string, path::PathBuf, time::Duration};
 
 use cleanup::cleanup;
 use serde::Deserialize;
 use sqlx::sqlite::SqlitePoolOptions;
 
 use tokio::fs::create_dir_all;
+
+use duration_str::deserialize_duration;
 
 mod cleanup;
 mod http;
@@ -18,8 +20,12 @@ pub struct Config {
     url: String,
     #[serde(default = "_default_path")]
     data_dir: PathBuf,
-    image_ttl: u64,
-    cleanup_interval: u64,
+    #[serde(deserialize_with = "deserialize_duration")]
+    image_ttl: Duration,
+    #[serde(deserialize_with = "deserialize_duration")]
+    paste_ttl: Duration,
+    #[serde(deserialize_with = "deserialize_duration")]
+    cleanup_interval: Duration,
 }
 
 #[tokio::main]

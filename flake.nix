@@ -1,6 +1,7 @@
 {
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
+    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     cargo2nix = {
       url = "github:cargo2nix/cargo2nix/release-0.11.0";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -18,6 +19,9 @@
           inherit system;
           overlays = [ cargo2nix.overlays.default ];
         };
+        unstable = import nixpkgs-unstable {
+          inherit system;
+        };
 
         rustPkgs = pkgs.rustBuilder.makePackageSet {
           rustVersion = "1.75.0";
@@ -31,8 +35,8 @@
           imgserv = (rustPkgs.workspace.imgserv { });
           default = packages.imgserv;
         };
-        devShells.default = pkgs.mkShell {
-          nativeBuildInputs = with pkgs; [
+        devShells.default = unstable.mkShell {
+          nativeBuildInputs = with unstable; [
             cargo
             sqlx-cli
             rustc
