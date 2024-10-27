@@ -78,9 +78,9 @@ pub async fn upload(
     let time: i64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         //you and i should be long dead when this conversion starts failing (and sqlite supports unsigned ints then)
-        .map(|val| i64::try_from(val.as_secs()).unwrap())
+        .map(|val| i64::try_from((val + state.config.image_ttl).as_secs()).unwrap())
         .map_err(|_| ApiError::Internal("Welcome at the end of time!"))?;
-    let id: i64 = sqlx::query!("INSERT INTO images (created) VALUES (?) RETURNING id", time)
+    let id: i64 = sqlx::query!("INSERT INTO images (expires) VALUES (?) RETURNING id", time)
         .fetch_one(db)
         .await
         .map_err(|_| ApiError::Internal("DB write failed"))?

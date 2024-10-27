@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id FROM images WHERE created <= ?",
+  "query": "INSERT INTO images (expires) VALUES (?) RETURNING id",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "9eeea857dedf86252837277c1acf13b96df70b7024d840f6d75e635c93c1d86d"
+  "hash": "9c313e3ee441ab4ae805dacd5c09c393ea078e6e47f4cf07d54da8e68d6f2115"
 }

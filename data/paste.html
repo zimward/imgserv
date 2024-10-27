@@ -1,0 +1,28 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <meta charset="utf8">
+    <title>Upload Paste</title>
+    <style>
+      .inp {
+        width:100%;
+      }
+      .cent{
+        margin-left:auto;
+        margin-right:auto;
+        display:flex;
+        justify-content:center;
+        width:80vw;
+        max-width:10cm;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="cent">
+    <form id="paste" class="inp" method="post">
+      <textarea style="width:98%;height:50vh;resize:vertical;" name="text" form="paste" placeholder="Your paste goes here!" required></textarea>
+      <input class="inp" type="submit" value="Upload">
+    </form>
+    </div>
+  </body>
+</html>

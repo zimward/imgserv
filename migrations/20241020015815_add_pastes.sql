@@ -4,3 +4,7 @@ CREATE TABLE pastes (
     expires INTEGER,
     text BLOB NOT NULL
 );
+
+UPDATE images SET created = created + 1209600;
+
+ALTER TABLE images RENAME created TO expires;

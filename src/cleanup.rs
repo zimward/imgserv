@@ -12,14 +12,17 @@ async fn cleanup_img(ttl: Duration, data_dir: &Path, unix_time: i64, db: &Pool<S
     //time 14 days ago
     #[allow(clippy::cast_possible_wrap)]
     let expiry_date: i64 = unix_time.saturating_sub(ttl.as_secs() as i64);
-    //has the file been created before that
-    let expired: Vec<i64> = sqlx::query!("SELECT id FROM images WHERE created <= ?", expiry_date)
-        .fetch_all(db)
-        .await
-        .unwrap()
-        .iter()
-        .map(|r| r.id)
-        .collect();
+    //delete all expired images,returning the file id
+    let expired: Vec<i64> = sqlx::query!(
+        "DELETE FROM images WHERE expires <= ? RETURNING id",
+        expiry_date
+    )
+    .fetch_all(db)
+    .await
+    .unwrap()
+    .iter()
+    .map(|r| r.id)
+    .collect();
     //delete all expired files
     for e in &expired {
         if remove_file(format!("{}/data/{e}", data_dir.to_str().unwrap()))
@@ -28,18 +31,6 @@ async fn cleanup_img(ttl: Duration, data_dir: &Path, unix_time: i64, db: &Pool<S
         {
             eprintln!("Failed to find data/{e}");
         }
-    }
-    let res = sqlx::query!("DELETE FROM images WHERE created <= ?", expiry_date)
-        .execute(db)
-        .await
-        .unwrap()
-        .rows_affected();
-    if expired.len() as u64 != res {
-        eprintln!(
-            "Error: query deleted {} elements while {} where expected",
-            res,
-            expired.len()
-        );
     }
 }
 

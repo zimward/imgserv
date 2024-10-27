@@ -6,8 +6,8 @@ use std::{
 use axum::{
     body::{Body, HttpBody},
     extract::{Path, Request, State},
-    http::{header, HeaderValue, StatusCode},
-    response::Response,
+    http::{header, HeaderValue, Response, StatusCode},
+    Form,
 };
 use futures::TryStreamExt;
 use serde::Deserialize;
@@ -16,11 +16,10 @@ use tokio_util::io::StreamReader;
 
 use super::{ApiError, AppState};
 
-pub async fn upload(
-    State(state): State<Arc<AppState>>,
+pub async fn direct_upload(
+    state: State<Arc<AppState>>,
     request: Request,
 ) -> Result<(StatusCode, String), ApiError> {
-    let db = &state.db;
     let ds = request.into_body().into_data_stream();
     if ds.is_end_stream() {
         return Err(ApiError::BadRequest);
@@ -34,6 +33,14 @@ pub async fn upload(
     if reader.read_to_string(&mut paste).await.is_err() {
         return Err(ApiError::BadRequest);
     }
+    Ok((StatusCode::OK, upload(state, &paste).await?))
+}
+
+async fn upload<'a>(
+    State(state): State<Arc<AppState>>,
+    paste: &'a str,
+) -> Result<String, ApiError> {
+    let db = &state.db;
     let paste = zstd::bulk::compress(paste.as_bytes(), 19);
     if let Ok(paste) = paste {
         //crash if time or id fails
@@ -51,7 +58,7 @@ pub async fn upload(
         .await
         .map_err(|_| ApiError::Internal("DB write failed"))?
         .id;
-        Ok((StatusCode::OK, format!("{}/paste/{id}", state.config.url)))
+        Ok(format!("{}/paste/{id}", state.config.url))
     } else {
         Err(ApiError::Internal("Compression failed"))
     }
@@ -69,11 +76,28 @@ pub async fn get(
         .map_err(|_| ApiError::NotFound)?
         .text;
     let mut response = Response::new(Body::from(data));
-    response
-        .headers_mut()
-        .insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
     response
         .headers_mut()
         .insert(header::CONTENT_ENCODING, HeaderValue::from_static("zstd"));
     Ok(response)
+}
+
+#[derive(Deserialize)]
+pub struct Upload {
+    text: String,
+}
+pub async fn form_resp<'a>(
+    state: State<Arc<AppState>>,
+    Form(form): Form<Upload>,
+) -> Result<Response<Body>, ApiError> {
+    let url = upload(state, &form.text).await?;
+    let mut resp = Response::new(Body::empty());
+    resp.headers_mut()
+        .insert(header::LOCATION, url.parse().unwrap());
+    *resp.status_mut() = StatusCode::SEE_OTHER;
+    Ok(resp)
 }
