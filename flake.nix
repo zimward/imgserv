@@ -1,12 +1,7 @@
 {
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-24.05";
-    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
-    cargo2nix = {
-      url = "github:cargo2nix/cargo2nix/release-0.11.0";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    flake-utils.follows = "cargo2nix/flake-utils";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs =
@@ -17,25 +12,39 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [ cargo2nix.overlays.default ];
         };
-        unstable = import nixpkgs-unstable {
-          inherit system;
-        };
-
-        rustPkgs = pkgs.rustBuilder.makePackageSet {
-          rustVersion = "1.75.0";
-          packageFun = import ./Cargo.nix;
-        };
-
+        fs = pkgs.lib.fileset;
       in
       rec {
         packages = {
           # replace hello-world with your package name
-          imgserv = (rustPkgs.workspace.imgserv { });
+          imgserv = pkgs.rustPlatform.buildRustPackage {
+            pname = "imgserv";
+            version = "0.1.0";
+            src = fs.toSource {
+              root = ./.;
+              fileset = fs.unions [
+                ./Cargo.toml
+                ./Cargo.lock
+                ./src
+                ./build.rs
+                ./data
+                ./migrations
+                ./.sqlx
+              ];
+            };
+            # currently impossible due to tree magic dependency, waiting for upstream release
+            # cargoHash = "";
+            cargoLock = {
+              lockFile = ./Cargo.lock;
+              outputHashes = {
+                "tree_magic_mini-3.1.6" = "sha256-IJ2tVnPb+NmsrGUnfIuRgMIYAi8j+4dtrEXQAN0wA4s=";
+              };
+            };
+          };
           default = packages.imgserv;
         };
-        devShells.default = unstable.mkShell {
+        devShells.default = pkgs.mkShell {
           nativeBuildInputs = with unstable; [
             cargo
             sqlx-cli
