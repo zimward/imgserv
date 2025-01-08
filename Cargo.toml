@@ -16,8 +16,7 @@ tower-service = "0.3"
 #parsing
 serde = "1.0"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
-tree_magic_mini = {git = "https://github.com/mbrubeck/tree_magic.git"}
-# tree_magic_mini = "3.1"
+tree_magic_mini = "3.1"
 
 #utilities
 tokio-util = { version = "0.7", features = ["io-util", "full"] }

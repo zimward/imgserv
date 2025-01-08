@@ -1,21 +1,17 @@
-use std::{
-    path::Path,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{path::Path, time::UNIX_EPOCH};
 
 use sqlx::{Pool, Sqlite};
 use tokio::fs::remove_file;
 
 use crate::Config;
 
-async fn cleanup_img(ttl: Duration, data_dir: &Path, unix_time: i64, db: &Pool<Sqlite>) {
+async fn cleanup_img(data_dir: &Path, unix_time: i64, db: &Pool<Sqlite>) {
     //time 14 days ago
     #[allow(clippy::cast_possible_wrap)]
-    let expiry_date: i64 = unix_time.saturating_sub(ttl.as_secs() as i64);
     //delete all expired images,returning the file id
     let expired: Vec<i64> = sqlx::query!(
         "DELETE FROM images WHERE expires <= ? RETURNING id",
-        expiry_date
+        unix_time
     )
     .fetch_all(db)
     .await
@@ -43,7 +39,6 @@ async fn cleanup_pastes(unix_time: i64, db: &Pool<Sqlite>) {
 
 pub async fn cleanup(db: Pool<Sqlite>, config: &Config) {
     let mut interval = tokio::time::interval(config.cleanup_interval);
-    let ttl = config.image_ttl;
     let data_dir = config.data_dir.clone();
     tokio::spawn(async move {
         loop {
@@ -55,7 +50,7 @@ pub async fn cleanup(db: Pool<Sqlite>, config: &Config) {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as i64;
-            cleanup_img(ttl, &data_dir, unix_time, &db).await;
+            cleanup_img(&data_dir, unix_time, &db).await;
             cleanup_pastes(unix_time, &db).await;
         }
     });

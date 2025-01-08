@@ -45,7 +45,7 @@
           default = packages.imgserv;
         };
         devShells.default = pkgs.mkShell {
-          nativeBuildInputs = with unstable; [
+          nativeBuildInputs = with pkgs; [
             cargo
             sqlx-cli
             rustc
