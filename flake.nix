@@ -33,14 +33,7 @@
                 ./.sqlx
               ];
             };
-            # currently impossible due to tree magic dependency, waiting for upstream release
-            # cargoHash = "";
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-              outputHashes = {
-                "tree_magic_mini-3.1.6" = "sha256-IJ2tVnPb+NmsrGUnfIuRgMIYAi8j+4dtrEXQAN0wA4s=";
-              };
-            };
+            cargoHash = "sha256-FVtzROPo5md18zgOiwAa3QeHsL1u/07vX7vKwFKGbKc=";
           };
           default = packages.imgserv;
         };

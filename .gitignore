@@ -3,3 +3,4 @@ db.sqlite
 config.toml
 imgserv
 result-bin
+result
